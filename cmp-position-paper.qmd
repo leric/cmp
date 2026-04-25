@@ -47,54 +47,26 @@ The rest of the paper develops these ideas and then uses them to reinterpret sel
 
 ## The Context Minimization Principle
 
-### Query-Relative Context
+### Context as a Query-Relevant Working Set
 
 In this paper, an **engineering query** is a concrete question posed against a codebase with a definable correct answer or success criterion. Examples include:
 
-- *Comprehension:* What invariant does function F rely on?
-- *Modification:* What must I change to add this field end-to-end?
-- *Verification:* Will breaking this dependency cause a regression?
+- *Unit-or-path understanding:* What does this code path actually do?
+- *Purpose change:* What must change to add this field end-to-end?
+- *Verification:* Will changing this dependency violate an invariant?
 - *Debugging:* Where does this unexpected production value come from?
 
-Drawing an intuition from information theory — where information is defined in relation to uncertainty reduction [@shannon1948mathematical] — an engineering query represents a specific state of uncertainty. **Context**, then, is the precise set of signals a reader (human or AI) must process to reduce that uncertainty to zero. It represents the effective scope of the codebase that must be loaded into working memory to achieve a complete and correct understanding of the problem.
+Drawing an intuition from information theory — where information is defined in relation to uncertainty reduction [@shannon1948mathematical] — an engineering query represents a specific state of uncertainty. **Context**, then, is the sufficient working set of signals a reader must process to reach a reliable answer. It represents the effective scope of code, configuration, tests, documentation, types, runtime conventions, and domain assumptions that must be loaded for the query at hand.
 
 Crucially, context can be **explicit** or **implicit**. Explicit context is mechanically recoverable: a type signature, a well-named interface, or an inline comment. Implicit context consists of unstated assumptions, historical conventions, and "tribal knowledge" missing from the source text. For example, consider a module that requires `init()` to be called before `process()`. If this ordering is merely a convention, the temporal coupling is implicit context—a reader must trace the entire call stack to verify the rule is respected. If the design instead mandates that `init()` returns a `ReadyState` token which `process()` explicitly requires as an argument, the implicit historical knowledge is transformed into localized, compiler-verified context. A primary function of good software design is to convert unbounded implicit context into localized explicit context.
 
 Consequently, context is **query-relative**, not an intrinsic property of the code itself. Consider a simple 5-line function that parses a date string. For the query *"does this function support the ISO 8601 format?"*, the required context is just those 5 lines of code. But for the query *"why is this function causing a timezone offset bug in the reporting dashboard?"*, the context footprint expands. The reader must now load the server's ambient timezone configuration, the database's UTC storage conventions, and the data-fetching logic in the frontend client. The code itself has not changed, but the scope of information required to resolve the uncertainty has.
 
-This relativity does not make CMP vacuous. In practice, maintenance work is dominated by recurring query families. Comprehension and debugging queries ask, in different forms, *how does this behavior work?* They are sensitive to depth because the reader must traverse dependencies until the causal path is clear. Modification queries often ask *where must this business decision change?* They are sensitive to breadth because the reader must find every representation of a domain rule that must evolve together. CMP becomes operational by studying these recurring query families rather than treating every possible question as equally important.
+This relativity does not make CMP vacuous. In practice, maintenance work is dominated by recurring query families. The first is **unit-or-path understanding**: *what does this code, or this execution path, actually do?* The second is **purpose change**: *the requirement has shifted; where must I edit?* These two query clusters motivate the two principal modes of context expansion used throughout this paper: **depth** and **breadth**.
 
-### Human Context and Agent Context
+### Depth and Breadth Profiles
 
-Human developers and AI agents have different cognitive architectures, but they share a practical dependency on query-relevant information.
-
-For human developers, context cost appears as attention, working memory pressure, navigation effort, comprehension time, and the risk of overlooking hidden assumptions. A design that supports local reasoning allows the developer to make progress without reconstructing the entire system. This is one reason information hiding and modularity matter: they reduce the amount of external knowledge required to reason about a local change.
-
-For AI coding agents, context cost appears more mechanically. Relevant files must be retrieved or supplied in the prompt. Irrelevant files can pollute the prompt and distract the model. Large context increases token cost and latency. Missing context can produce plausible but incorrect changes. Hidden assumptions are difficult for an agent to recover unless they are encoded in tests, types, documentation, or accessible source structure.
-
-These two forms of context cost should not be treated as identical. Humans use long-term memory, social knowledge, visual scanning, and domain intuition in ways current agents do not. Agents can process large textual contexts quickly but may fail to distinguish contract from coincidence. Still, both humans and agents benefit when software design makes relevant information local, explicit, and bounded.
-
-### The Principle
-
-The **Context Minimization Principle** can be stated more formally:
-
-> Software design practices tend to improve maintainability when they reduce the query-relevant context that must be loaded across system boundaries, without obscuring essential domain complexity.
-
-This formulation has several important constraints.
-
-First, design evaluation under CMP must be grounded in an empirical **query distribution**. Because context is query-relative, it is tempting to dismiss any design debate with "it depends": a plugin architecture minimizes context for extension but inflates it for initial comprehension. However, this relativity does not render the principle un-operational. In practice, the universe of valuable queries for a given system is heavily skewed. When engineers argue about architecture, they are already implicitly assuming a specific workload of future changes. CMP makes this assumption explicit. A good design minimizes the context footprint for the *frequent and critical* queries a team actually faces (e.g., adding a new business rule), even if it increases the context cost for rare ones (e.g., swapping the database engine). By grounding evaluation in a query distribution, CMP escapes the "it depends" trap, shifting the debate from subjective aesthetics ("is this code elegant?") to empirical workloads ("does this structure pay off for our actual queries?").
-
-Second, **code minimization is not context minimization**. A common misconception is that shorter code is inherently lower-context. In reality, removing code often *increases* context if it replaces explicit behavior with implicit convention. A 100-line function with clear, linear control flow and explicit dependencies might require far less context to modify than a 10-line function that relies on metaprogramming, global state mutations, or undocumented framework lifecycles. Similarly, adding abstraction can reduce context when it creates a stable boundary, but inflate context when it forces readers to traverse indirection before understanding behavior.
-
-Third, CMP targets **avoidable context, not essential complexity**, but recognizes that profound design can reshape the domain itself. A common mistake is treating design as a passive container for inherently difficult business rules, hiding complexity behind opaque boundaries that merely relocate confusion. In reality, the "artificial cognitive tax" of avoidable context—scattered decisions, leaky abstractions, and implicit assumptions—is often a symptom of failing to grasp the domain's true shape. The best designs look past chaotic surface requirements to discover deep, underlying unities. When a model is distilled to its essence, both the structural noise and the perceived essential complexity drop. Because a superior design implementing the exact same domain functionality will inherently demand a smaller context footprint, CMP serves as a fundamental yardstick for architectural truth. Its ultimate goal is to ruthlessly eliminate artificial cognitive tax, freeing the reader to engage with—and perhaps even simplify—the true complexities of the domain.
-
-## Two Modes of Context Expansion: Depth and Breadth
-
-Context grows in different ways. This paper focuses on two major modes: **depth** and **breadth**. They are not exhaustive, but they provide a useful first decomposition of context-related design cost.
-
-### Depth: Context Through Dependency Chains
-
-**Depth** refers to context expansion through dependency traversal. A developer or agent begins with a code unit, but understanding it requires following calls, inheritance chains, configuration bindings, framework callbacks, global state, generated code, or runtime conventions. The deeper the traversal, the more context must be loaded before local reasoning becomes reliable.
+**Depth** refers to context expansion through dependency traversal. It is most visible in unit-or-path understanding queries. A developer begins with a code unit, but understanding it requires following calls, inheritance chains, configuration bindings, framework callbacks, global state, generated code, or runtime conventions. The deeper the traversal, the more context must be loaded before local reasoning becomes reliable.
 
 For example, imagine trying to understand why a parameter in a web controller is unexpectedly `null`. In a deeply abstracted system, answering this query might require traversing through three layers of dependency injection, two aspect-oriented interceptors, and a global exception handler just to find where the value was originally mutated.
 
@@ -102,9 +74,7 @@ Common sources of depth include leaky abstractions, deep inheritance hierarchies
 
 The design goal for depth is to enable local reasoning by cutting dependency traversal at reliable boundaries. A boundary is reliable when the client can use it without repeatedly inspecting its internals. Type signatures, tests, documentation, invariants, module visibility, and stable interfaces can all help create such boundaries.
 
-### Breadth: Context Through Knowledge Dispersion
-
-**Breadth** refers to context expansion through knowledge dispersion. Instead of following a deep chain, the developer or agent must search across many locations because one piece of knowledge is duplicated, fragmented, or inconsistently represented.
+**Breadth** refers to context expansion through location search and knowledge dispersion. It is most visible in purpose-change queries. Instead of following a deep chain, the developer must search across many locations because one piece of knowledge is duplicated, fragmented, or inconsistently represented.
 
 For example, consider a product requirement to add a new "Guest" user role. To fulfill this single intent, a developer might have to update a database enum, modify an ORM model, rewrite hardcoded authorization logic scattered across five different controllers, and add a new option to a frontend dropdown. The knowledge of what constitutes a "role" is dispersed, forcing a broad and fragile context search.
 
@@ -112,17 +82,31 @@ Common sources of breadth include duplicated business rules, copy-pasted validat
 
 The design goal for breadth is to keep each piece of knowledge localized enough that change does not require broad search and synchronization. This is the context-based rationale behind DRY, single source of truth, schema centralization, shared domain language, and bounded contexts. The point is not to eliminate every repeated token. The point is to avoid dispersing the same decision across places that must evolve together.
 
-### Why Both Dimensions Are Needed
+The mapping from query cluster to context mode is dominant rather than pure. Understanding a behavior may require some breadth if the behavior is implemented in several places. Changing a business rule may require depth if the authoritative rule is hidden behind indirection. The analytical unit of CMP is therefore not a scalar context score, but a **depth-breadth profile**: the combination of dependency traversal and location search a design imposes on a query and, over a realistic query distribution, on the workload as a whole.
+
+### The Principle
+
+The **Context Minimization Principle** can be stated more formally:
+
+> Software design practices tend to improve maintainability when they reduce the avoidable depth and breadth context required to answer the engineering queries a system must realistically support, without obscuring essential domain complexity.
+
+This formulation has several important constraints.
+
+First, design evaluation under CMP must be grounded in a realistic **query distribution**. Because context is query-relative, the question is not whether a structure is globally simple in the abstract. The question is which query families it makes cheap and which it makes expensive. A plugin architecture may reduce breadth for extension queries while increasing depth for initial comprehension. A layered architecture may protect domain logic in a complex system while imposing needless traversal in a simple CRUD application. CMP makes the workload assumption behind design judgment explicit.
+
+Second, **code minimization is not context minimization**. Shorter code is not inherently lower-context. Removing code can increase context if it replaces explicit behavior with implicit convention. A 100-line function with clear, linear control flow and explicit dependencies may require less context to modify than a 10-line function that relies on metaprogramming, global state mutations, or undocumented framework lifecycles. Similarly, adding abstraction can reduce context when it creates a stable boundary, but inflate context when it forces readers to traverse indirection before understanding behavior.
+
+Third, CMP targets **avoidable context, not essential complexity**. Some complexity belongs to the domain and cannot be removed by rearranging code [@brooks1987silver]. But avoidable context — scattered decisions, leaky abstractions, duplicated rules, implicit assumptions, and unstable boundaries — is different. It is context the reader must load because of the design's representation of the domain, not because the domain itself demands it. Good design reduces this artificial context while preserving, and sometimes clarifying, the essential complexity that remains.
+
+### The Over-engineering Criterion
 
 Depth and breadth capture different failure modes. Neither can replace the other.
 
 A system can have low depth and high breadth. Each function may be simple and locally readable, but a core business rule—such as how to calculate a discounted price—might be independently implemented in the backend API, the database trigger, the frontend UI logic, and the scheduled billing job. Understanding any single location is effortless, but changing the rule safely requires broad, exhaustive search. We will call such a system **knowledge-scattered**.
 
-A system can also have high depth and low breadth. A discount rule might be defined in exactly one place, perfectly honoring the DRY principle. However, reaching that place might require traversing a generic `RuleEngine` interface, unpacking a dependency-injected `DiscountStrategyFactory`, deciphering a chain of abstract decorators, and finally locating the concrete implementation registered only at runtime. The knowledge is not duplicated, yet the path to it is labyrinthine. We will call such a system **deeply-abstracted**.
+A system can also have high depth and low breadth. A discount rule might be defined in exactly one place, perfectly honoring the DRY principle. However, reaching that place might require traversing a generic `RuleEngine` interface, unpacking a dependency-injected `DiscountStrategyFactory`, deciphering a chain of abstract decorators, and finally locating the concrete implementation registered only at runtime. The knowledge is not duplicated, yet the path to it is labyrinthine. We will call such a system **deeply abstracted**.
 
-These two failure modes cannot be addressed with the same remedy. Removing duplication in a knowledge-scattered system can inadvertently turn it into a deeply-abstracted one. Conversely, flattening the abstractions in a deeply-abstracted system can revert it back into a knowledge-scattered one. Because this trade-off is so fundamental to structural design, it forms the core operational metric of CMP.
-
-### The Depth–Breadth Trade-off and the Over-engineering Criterion
+These two failure modes cannot be addressed with the same remedy. Removing duplication in a knowledge-scattered system can inadvertently turn it into a deeply abstracted one. Conversely, flattening the abstractions in a deeply abstracted system can revert it back into a knowledge-scattered one. Because this trade-off is so fundamental to structural design, it forms the core operational judgment rule of CMP.
 
 Depth and breadth are not only orthogonal; they are frequently in tension. A common way to reduce one is to increase the other. This makes CMP more than a pair of independent objectives to minimize in isolation. It gives the principle operational bite by framing design decisions as trade-offs over a shared currency.
 
@@ -272,7 +256,9 @@ Read this way, each generation of language abstraction has moved one more catego
 
 ## Implications for AI-Assisted Software Engineering
 
-If human developers benefit from explicit, minimized context, AI coding agents depend on it more directly. Human readers can fall back on memory, intuition, and accumulated tribal knowledge to recover what the code does not say. An agent has none of this. It has only what can be retrieved into its prompt — source files, types, tests, documentation, commit history. Whatever is not made explicit must either be inferred from weak signals or confabulated. In this sense, AI-assisted development does not just inherit the context problem from human maintainability; it sharpens it. Good design under CMP is not merely *also* useful for agents — it is more load-bearing, because an agent has fewer compensating mechanisms when design fails.
+Human developers and AI coding agents incur context cost differently. For humans, context cost appears as attention, working memory pressure, navigation effort, comprehension time, and the risk of overlooking hidden assumptions. For agents, it appears more mechanically: relevant files must be retrieved or supplied in the prompt; irrelevant files can distract the model; large context increases token cost and latency; missing context can produce plausible but incorrect changes.
+
+These costs should not be treated as identical. Human readers can fall back on memory, intuition, visual scanning, and accumulated tribal knowledge to recover what the code does not say. An agent has fewer compensating mechanisms. It has only what can be retrieved into its prompt — source files, types, tests, documentation, commit history. Whatever is not made explicit must either be inferred from weak signals or confabulated. In this sense, AI-assisted development does not just inherit the context problem from human maintainability; it sharpens it. Good design under CMP is not merely *also* useful for agents — it is more load-bearing, because an agent has fewer ways to recover when design fails.
 
 This sharpening comes with a practical upside: agent workflows make context cost *observable*. A human developer may describe a system as "hard to understand," but an agent workflow exposes concrete signals — retrieval size, prompt length, irrelevant context ratio, number of tool calls, retry count, patch failure, and test failure after generation — that turn a long-standing design concern into measurable data.
 
@@ -282,7 +268,7 @@ CMP is a conceptual position, not a completed measurement theory. For the princi
 
 ### Measuring Depth
 
-A depth-oriented context metric would estimate the transitive context required to reason about a code unit while respecting abstraction boundaries. Unlike raw dependency count, such a metric should distinguish between dependencies that require implementation traversal and dependencies that are adequately summarized by stable contracts. As one concrete exploration of this dimension, we have been developing a tool called Context-Footprint along these lines; we mention it here as an illustration of what such a metric can look like, not as a settled methodology.
+A depth-oriented context metric would estimate the transitive context required to reason about a code unit while respecting abstraction boundaries. Unlike raw dependency count, such a metric should distinguish between dependencies that require implementation traversal and dependencies that are adequately summarized by stable contracts. One possible operationalization is to model a codebase as a dependency graph and estimate the reachable context from a target symbol, with traversal stopping at reliable abstraction boundaries. This paper deliberately remains metric-neutral: different languages, query types, and boundary models may require different measurement strategies.
 
 Open design questions include how to identify reliable boundaries, how to weight different dependency edges, how to account for tests and documentation, and how to distinguish essential domain traversal from avoidable design leakage. Static structure alone is unlikely to be enough. Useful depth metrics may combine call graphs, type information, visibility, ownership, historical change data, and agent retrieval traces.
 

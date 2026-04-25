@@ -5,7 +5,7 @@ author:
     affiliation: "Independent"
 date: "2026-04-24"
 abstract: |
-  Software design principles are often taught as separate rules, making it difficult to explain why they help, when they conflict, and when following them becomes over-engineering. This position paper proposes the **Context Minimization Principle** (CMP): a design is better, all else equal, when it reduces the query-relevant context a human developer or AI coding agent must load to reach a reliable answer, without obscuring essential domain complexity. Although context is query-relative, many maintenance tasks cluster around two recurring questions: how does this behavior work? and where does this domain decision need to change? CMP maps these questions to two modes of context expansion: **depth**, through dependency traversal, and **breadth**, through knowledge dispersion. Their trade-off yields an **Over-engineering Criterion**: a design move becomes suspect when the depth it introduces is not justified by the breadth it eliminates for the realistic engineering queries a system must support. Through this lens, familiar design principles and programming language abstractions become context-control mechanisms rather than isolated prescriptions.
+  Software design principles are often taught as separate rules, making it difficult to explain why they help, when they conflict, and when following them becomes over-engineering. This position paper proposes the **Context Minimization Principle** (CMP): a design is better, all else equal, when it reduces the query-relevant context a human developer or AI coding agent must load to reach a reliable answer, without obscuring essential domain complexity. Although engineering queries are diverse, many maintenance tasks cluster around two recurring forms: **unit-or-path understanding**, which asks what a code unit or execution path does, and **purpose change**, which asks where a shifted requirement must be edited. CMP maps these query clusters to two dominant modes of context expansion: **depth**, through dependency traversal, and **breadth**, through dispersed location search. Their trade-off yields an **Over-engineering Criterion**: a design move becomes suspect when the depth it introduces is not justified by the breadth it eliminates for the realistic engineering queries a system must support. Through this lens, familiar design principles and programming language abstractions become context-control mechanisms rather than isolated prescriptions.
 format:
   html:
     toc: true
@@ -138,87 +138,47 @@ Symmetrically, the criterion gives conditional defense to practices often labele
 
 Because this trade-off is the primary driver of design friction, any attempt to measure codebase quality—whether through static analysis or AI agent metrics—must account for both depth and breadth. Optimizing only one will systematically mislead design decisions.
 
-## Classical Design Principles Through the Context Lens
+## Applications: Design Principles as Context Controls
 
-To demonstrate CMP as a unifying explanatory framework, we can reinterpret several classical design principles through the context lens. For each principle, we will establish a unified rhythm: defining its traditional focus, providing its CMP reinterpretation, and showing how CMP addresses the principle's original limitations or failure modes.
+The purpose of CMP is not to replace existing design principles with new slogans. It is to explain why familiar principles help, why they conflict, and where they stop helping. The examples below are therefore selective rather than encyclopedic: each illustrates a different way that design practice controls depth, breadth, or the trade-off between them.
 
-### Information Hiding and Deep Modules
+### Information Hiding: Cutting Depth
 
-**Traditional Focus:** Parnas argued that modules should be decomposed around design decisions likely to change, hiding those volatile decisions behind stable interfaces [@parnas1972criteria]. Ousterhout later popularized this as "Deep Modules" — small interfaces hiding deep implementations [@ousterhout2018philosophy].
+Parnas argued that modules should be decomposed around design decisions likely to change, hiding those volatile decisions behind stable interfaces [@parnas1972criteria]. Ousterhout later described a similar ideal as "deep modules": small interfaces that conceal substantial implementation complexity [@ousterhout2018philosophy]. In CMP terms, information hiding works by cutting **depth**. A good boundary lets a caller answer a unit-or-path understanding query without traversing into representation details.
 
-**CMP Interpretation:** Information hiding is fundamentally about minimizing a caller's **depth context**. A hidden decision is simply one that a client no longer needs to load to answer their query. The boundary absorbs internal complexity, presenting a minimal explicit context.
+This also clarifies why superficial encapsulation is not enough. Making fields `private` while exposing setters does not reduce context if callers still need to understand the object's internal state machine to use those setters safely. The boundary only works when it changes the query's depth profile: the caller can rely on an explicit contract instead of loading implementation history.
 
-"Encapsulation" is often mistakenly reduced to simply making fields `private` while exposing getters and setters. If a client still needs to understand the object's internal state machine to use the setter safely, the context footprint hasn't shrunk at all. CMP clarifies that a boundary only works if it genuinely halts dependency traversal during a query.
+### DRY and Domain Locality: Cutting Breadth
 
-### Coupling and Cohesion
+DRY is best read as a breadth-control principle. When the same business decision is encoded in multiple locations, a purpose-change query becomes a search problem: every representation of the decision must be found, understood, and updated consistently. Cohesion, single source of truth, schema centralization, and DDD's bounded contexts and ubiquitous language all serve a similar role: they reduce the number of places a reader must search to understand or change a domain concept [@evans2003ddd].
 
-**Traditional Focus:** Systems should exhibit low coupling (few dependencies between modules) and high cohesion (related responsibilities belong together).
+The context lens also explains why DRY is frequently misapplied. Two similar-looking loops in unrelated domains may be structural duplication but not knowledge duplication. Extracting them into a shared abstraction removes little breadth while adding depth for every caller. This is the context-cost version of the warning that "duplication is far cheaper than the wrong abstraction" [@metz2016wrong]. DRY helps when it localizes a decision that must evolve together; it hurts when it invents a shared concept that the domain does not actually share.
 
-**CMP Interpretation:** High cohesion reduces **breadth context** for modification queries: when related knowledge is kept together, a single business change doesn't trigger a massive, cross-module search. Low coupling reduces **depth context** for comprehension queries: you don't need to traverse the entire system to understand a single module.
+### Architecture: Trading Breadth for Depth
 
-Traditional coupling metrics simply count structural edges (e.g., number of method calls or imports). But calling a pure `Math.max()` function (one edge) costs zero depth context, while invoking a method that mutates a global configuration dictionary (also one edge) requires massive implicit context to use safely. CMP shifts the focus from edge-counting to measuring the actual cognitive cost of traversing an edge.
+Clean and hexagonal architecture separate domain logic from infrastructure by forcing dependencies inward through ports and adapters [@cockburn2005hexagonal; @martin2017clean]. Under CMP, this is not simply a rule about dependency direction. Its central move is to create explicit context boundaries around external mechanisms. A well-specified port lets a reader understand a use case without traversing into every adapter implementation. The interface, not the database driver, message bus, or HTTP client, becomes the context needed for the domain query.
 
-### DRY (Don't Repeat Yourself)
+When these boundaries are reliable, the structure lowers effective depth despite adding more code units. A query about a pricing rule should not require loading ORM mapping details, HTTP parsing, retry policy, or message-bus behavior. A use case can also reduce breadth by centralizing the orchestration of a business action that would otherwise be spread across controllers, event handlers, and transaction scripts.
 
-**Traditional Focus:** Every piece of knowledge must have a single, unambiguous, authoritative representation within a system.
+The failure mode is not that ports and use cases mechanically add depth. The failure mode is that the boundary fails to stop traversal. A port with no behavioral contract, unclear responsibilities, or undocumented edge cases forces readers back into adapter implementations to discover what the use case can rely on. For simple CRUD features with little domain policy, the same layers may also fail to remove meaningful breadth because there was little scattered business logic to centralize. CMP therefore treats architectural layering as conditional: valuable when its boundaries are reliable and protect frequent, important queries; costly when it merely regularizes trivial ones.
 
-**CMP Interpretation:** DRY is a strict heuristic for minimizing **breadth context**. When a business rule is duplicated, any modification query requires an exhaustive, error-prone search across the codebase to synchronize the scattered knowledge.
+### Tests: Making Context Explicit
 
-DRY is notoriously misapplied to purely structural duplication (e.g., two identical loops serving completely different business domains). When developers prematurely extract an abstraction to "DRY up" this coincidental duplication, they pay a massive depth context penalty for zero actual breadth context savings. CMP explicitly solves this via the Over-engineering Criterion: DRY is only beneficial when it eliminates more breadth context than the depth context it introduces.
+Tests, especially in the TDD tradition, turn implicit behavioral expectations into executable context [@beck2002tdd]. A focused test externalizes the answer to "what must remain true here?", allowing future readers to rely on a mechanical boundary instead of reverse-engineering intent from implementation details. During refactoring, tests also make the depth-breadth trade-off safer: a developer can reduce breadth by extracting shared logic or reduce depth by flattening an abstraction while checking that the externally visible context has not shifted.
 
-### SOLID
+Tests can also inflate context. Brittle tests that mock internal details encode the *how* rather than the *what*. When a harmless refactor breaks many tests, the tests have stopped acting as a boundary and have become another dispersed representation of implementation structure. In CMP terms, good tests localize behavioral context; bad tests duplicate depth context as breadth.
 
-**Traditional Focus:** A suite of five object-oriented design principles aimed at making software more understandable, flexible, and maintainable [@martin2000principles].
+### Supporting Heuristics
 
-**CMP Interpretation:** SOLID is essentially a collection of heuristics for maintaining context boundaries.
+Other design vocabularies can be summarized in the same terms:
 
-Blindly following SOLID often leads to highly fragmented codebases with excessive interfaces and dependency injection containers—maximizing depth context to an extreme degree. CMP provides the missing stopping condition for SOLID: apply these patterns only when the depth context they introduce is justified by the breadth context they eliminate.
+| Practice or principle | Context-control role | CMP stopping condition |
+| --- | --- | --- |
+| Coupling and cohesion | Low coupling reduces depth; high cohesion reduces breadth. | Structural edge counts are insufficient when an edge has a stable contract or hides implicit state. |
+| SOLID [@martin2000principles] | Maintains object-oriented context boundaries through substitutability, interface focus, and dependency inversion. | Interfaces and indirection are justified only when they reduce more context than they add. |
+| DDD tactical patterns [@evans2003ddd] | Aggregates, value objects, and anti-corruption layers localize invariants and external concepts. | The pattern vocabulary should not exceed the domain complexity it clarifies. |
 
-The table below details how each SOLID principle acts as a context control mechanism:
-
-| **Principle**                   | **Traditional Focus**                               | **CMP Interpretation**                                       |
-| ------------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
-| **SRP** (Single Responsibility) | A class should have only one reason to change.      | Bounds **breadth context** by keeping domain concepts together, and **depth context** by isolating unrelated changes. |
-| **OCP** (Open-Closed)           | Open for extension, closed for modification.        | Reduces the **depth context** needed to verify existing code when adding new features. |
-| **LSP** (Liskov Substitution)   | Subtypes must be substitutable for base types.      | Ensures boundaries are reliable; callers don't need to load the implicit **depth context** of concrete subclasses. |
-| **ISP** (Interface Segregation) | Clients shouldn't depend on methods they don't use. | Minimizes the explicit **depth context** a client must load to understand its contract. |
-| **DIP** (Dependency Inversion)  | Depend on abstractions, not concretions.            | Cuts **depth traversal** by replacing deep implementation context with a minimal abstract boundary. |
-
-## Methodologies and Practices
-
-### Domain-Driven Design (DDD)
-
-**Core Concept:** DDD is a comprehensive methodology for modeling complex software, encompassing both strategic boundaries and tactical implementation patterns [@evans2003ddd].
-
-**CMP Interpretation:** DDD is perhaps the most explicit methodology for managing both depth and breadth context in business software. Its patterns map directly to context minimization strategies:
-
-- **Bounded Contexts (Strategic):** A Bounded Context restricts the **breadth context** of a domain concept. A "Customer" in the Billing context has a different structure and lifecycle than a "Customer" in the Shipping context. By preventing conceptual leakage, it shrinks the required context footprint for domain queries; a developer changing Billing does not need to load Shipping constraints.
-- **Ubiquitous Language (Strategic):** Eliminates **implicit depth context**. When business experts and developers use different terms, the "translation" becomes a cognitive tax. A ubiquitous language ensures that business intent maps directly to code, removing the need to traverse mental translation layers to understand a query.
-- **Aggregates (Tactical):** An Aggregate Root is a strict **depth boundary** for state mutation. Clients must interact with the root and cannot traverse into the aggregate's internal object graph to change state. This encapsulates invariants, ensuring that the rules governing a set of objects are not dispersed (low breadth) and that clients don't need to understand the internal object graph to use it safely (low depth).
-- **Value Objects (Tactical):** By enforcing immutability and identity by value, Value Objects eliminate the **depth context** of state history. A reader does not need to load the context of "who else holds a reference to this object and might change it?"—the value can be understood purely locally.
-- **Anti-Corruption Layer (Strategic/Tactical):** Acts as a context firewall. It cuts **depth traversal** by preventing the concepts of an external or legacy system from bleeding into the local domain model. Developers working in the core domain do not need to load the idiosyncratic context of the external dependency.
-
-### Clean and Hexagonal Architecture
-
-**Core Concept:** These architectures (including Ports and Adapters) separate software into concentric layers, mandating that dependencies only ever point inward toward the core domain logic [@cockburn2005hexagonal; @martin2017clean].
-
-**CMP Interpretation:** Clean Architecture is fundamentally a strategy for aggressively bounding **depth context** for the most important queries (domain rules) by inverting dependencies, while using Use Cases to manage **breadth context**:
-
-- **Ports and Adapters (Dependency Inversion):** By forcing infrastructure (databases, UIs) to implement interfaces defined by the inward domain, the architecture severs the domain's outward dependency chain. When answering a query about core business logic, a developer does not need to load the **depth context** of how an ORM maps fields, how a message bus retries, or how an HTTP request is parsed. The infrastructure context is firewalled behind a stable interface.
-- **Use Cases (Interactors):** These construct a localized boundary for application-specific orchestrations. Instead of dispersing the steps for a complex action like "Checkout Cart" across a web controller, an event dispatcher, and a database transaction script (high breadth), a Use Case centralizes the orchestration. The reader loads the exact sequence of steps in one place, minimizing the search required.
-
-**Failure Modes:** Clean Architecture is notoriously susceptible to violating the **Over-engineering Criterion**. When applied dogmatically to simple CRUD features, it forces developers to traverse Controllers, Use Case boundaries, Repository interfaces, and Data Mappers just to save a record. This imposes a massive **depth context tax** (navigating multiple layers of indirection) while providing zero **breadth context relief** (the business logic is trivial and wasn't dispersed anyway). CMP clarifies that architectural layering is only valuable when it actually halts the leakage of complex external context.
-
-### Test-Driven Development (TDD)
-
-**Core Concept:** Writing executable specifications (tests) before or alongside the implementation, following a strict Red-Green-Refactor loop [@beck2002tdd].
-
-**CMP Interpretation:** TDD is a practice of establishing explicit context boundaries *before* writing the implementation. It serves as both a context-discovery and context-bounding mechanism:
-
-- **Executable Context Boundaries:** A focused test explicitly answers the query "what must remain true here?" by externalizing behavioral expectations. This transforms implicit tribal knowledge into explicit, mechanical context, freeing future readers from having to reverse-engineer intent from deep implementation details.
-- **The Red-Green-Refactor Loop:** The "Red" phase forces the developer to define the exact breadth of the new requirement from the outside (the query). The "Green" phase allows unconstrained depth to satisfy it. The "Refactor" phase is the explicit application of the Over-engineering Criterion: optimizing the depth/breadth trade-off (e.g., extracting duplication to reduce breadth) while the test acts as a safety net that guarantees the outer context boundary hasn't shifted.
-
-**Failure Modes:** Brittle, deeply coupled tests—such as those relying on heavy mocking of internal implementation details—destroy the context boundary. Over-mocking forces the test to encode the *how* rather than the *what*. When a simple refactoring breaks 50 tests, the tests are no longer functioning as a stable boundary against depth context; they have instead duplicated the depth context, acting as a massive cognitive tax.
+These applications share the same shape. A principle is useful when it improves the depth-breadth profile of the queries a system actually faces. It becomes dogma when it optimizes a proxy — fewer duplicates, more interfaces, stricter layers, more tests — without improving that profile.
 
 ## Programming Language Abstractions as Context Boundary Mechanisms
 

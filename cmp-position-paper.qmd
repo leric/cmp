@@ -180,39 +180,50 @@ Other design vocabularies can be summarized in the same terms:
 
 These applications share the same shape. A principle is useful when it improves the depth-breadth profile of the queries a system actually faces. It becomes dogma when it optimizes a proxy — fewer duplicates, more interfaces, stricter layers, more tests — without improving that profile.
 
-## Programming Language Abstractions as Context Boundary Mechanisms
+## Programming Language Abstractions as Enforced Context Boundaries
 
-Many features of modern programming languages can be read as mechanisms for making context boundaries explicit and enforceable. This is not their only purpose — languages also serve expressiveness, performance, and safety in ways not fully reducible to context — but the CMP lens helps explain why features that constrain interaction so often improve maintainability.
+Design principles create context boundaries through discipline, convention, and documentation. Programming languages can go further: they can make some boundaries explicit in syntax, enforce them with a compiler or runtime, and reject programs that cross them incorrectly. This is not the only purpose of language design — languages also serve expressiveness, performance, safety, and ergonomics — but CMP explains why many maintainability-improving language features work: they move context out of informal reasoning and into checkable contracts.
 
-### Features That Bound Context
+### From Convention to Checkable Boundary
 
-- **Type signatures** bound the set of values a function can receive and produce, so callers do not have to recover implicit shape information from implementations. Stronger type systems extend this with generics, type classes, and refinement types.
-- **Visibility and module systems** limit which internals are reachable, preventing accidental context leakage and stabilizing the surface that clients must load.
-- **Interfaces, traits, and abstract types** let clients rely on contracts rather than concrete implementations, cutting dependency traversal at a declared boundary. Crucially, an interface without detailed comments specifying its behavioral contract fails to act as a true boundary. Without comments explaining responsibilities and edge cases, the interface's information is incomplete, forcing the reader to traverse into concrete implementations anyway. In this lens, code comments are not a stylistic preference, but an essential structural component of the context boundary itself.
-- **Explicit error handling** (e.g., `Result`/`Option` types) places failure modes as explicit context directly in the function signature. Traditional exceptions, by contrast, create implicit depth context—callers must traverse the entire call stack to discover what might be thrown.
-- **Actor models and channel-based concurrency** establish strict context boundaries via message passing. Unlike shared-memory concurrency, which leaves the context boundary entirely open (any thread might mutate state at any time, requiring unbounded depth context), message passing isolates state and makes interaction explicit.
-- **Immutability and value semantics** eliminate state-history context by guaranteeing that observed values do not change under aliasing or time.
-- **Ownership and borrowing systems**, as in Rust, encode resource-lifetime constraints into the type system. Reasoning about memory or concurrency no longer requires loading global assumptions about who owns what; the type checker enforces them locally.
-- **Effect systems and capability types** make side-effect context explicit. A function annotated with its effects declares the ambient context a caller must consider, rather than hiding it behind implicit I/O or mutation.
+A design boundary is reliable only when a reader can stop traversing it for the query at hand. Language mechanisms can make such stopping points stronger. A type signature can state which values may cross a function boundary. A module system can state which names are reachable. An ownership system can state who may mutate or alias a value. In each case, the reader no longer has to recover the relevant rule from scattered usage patterns or historical convention; some part of the context has become local and mechanically checked.
 
-### Context Inflators: When Language Features Destroy Boundaries
+The important point is not that language abstraction always reduces context. It reduces context when it makes the right boundary explicit and reliable for the relevant query. It increases context when it hides behavior behind resolution rules, generated code, implicit conversions, or ambient effects that the reader must reconstruct.
 
-Conversely, features that prioritize code brevity over explicit boundaries often act as context inflators, creating severe leakage:
+### Categories of Language-Level Context Control
 
-- **Metaprogramming and macros** reduce token count (DRY) but explode depth context. The reader must mentally execute the macro expansion rules to understand the actual behavior, replacing explicit text with implicit generation logic.
-- **Implicit type conversions** shrink local code but force readers into an unbounded search across scopes to find where the conversion was defined, destroying local reasoning.
+The CMP lens can classify language features by the kind of context they bound:
 
-### Extended Example: Ownership as Context Control
+| Language mechanism | Context controlled | How it reduces context |
+| --- | --- | --- |
+| Type signatures and stronger type systems | Value and shape context | Callers can rely on declared input and output constraints rather than inferring them from implementations. |
+| Visibility and module systems | Reachability context | Internals that should not matter to a query are made inaccessible or non-importable. |
+| Interfaces, traits, and abstract types | Behavioral boundary context | Clients can depend on a contract rather than concrete implementations, provided the contract is specified by types, tests, documentation, naming, or formal rules. |
+| Explicit error handling and effect systems | Failure and side-effect context | Possible failures or effects become part of the local contract instead of hidden control flow. |
+| Immutability and value semantics | State-history context | Readers need not ask who else may mutate the value after it is observed. |
+| Ownership and borrowing | Lifetime and aliasing context | Resource and mutation constraints are checked locally instead of reconstructed from non-local conventions. |
 
-Rust's ownership system is a useful concrete illustration. Without ownership, correctly using a pointer or reference requires loading a substantial amount of non-local context: who allocated it, when it is freed, whether it may be aliased, whether it crosses threads, and whether other code mutates it concurrently. This is depth context par excellence — the caller must traverse dependencies and informal conventions to reason about safety.
+This table is not a ranking of languages or features. It identifies a recurring pattern: a feature helps CMP when it turns an implicit question into an explicit boundary. The stronger and more precise the boundary, the less dependency traversal or location search a reader must perform.
 
-Ownership, borrowing, and lifetime annotations move this context out of tribal knowledge and into the type system. A reader of a function signature can answer ownership and aliasing queries locally. The domain complexity of memory and aliasing has not disappeared; it has been relocated to a boundary where callers can rely on it without loading further context. This is the same pattern Parnas identified for information hiding, realized at the level of language-enforced contracts.
+### When Language Features Inflate Context
+
+Language features can also inflate context. The problem is not abstraction itself, but abstraction that hides the information needed to answer a query. Reflection, dynamic dispatch through unclear registries, ambient global state, implicit type conversions, and unstructured metaprogramming can reduce local code while increasing depth: the reader must find the runtime rule, generated code, or implicit resolution path that determines behavior.
+
+Macros illustrate the conditional nature of the problem. A hygienic macro with a narrow purpose and predictable expansion can be a useful boundary; a macro system that changes control flow, defines names implicitly, or generates large amounts of behavior behind a small call site can force the reader to mentally execute the language extension before understanding the program. The same logic applies to exceptions. Checked or typed error channels can make failure context local; unchecked exceptions or framework-level exception handling can push that context into call-stack traversal and configuration search.
+
+Thus, CMP does not divide language features into good and bad categories. It asks whether a feature reduces the depth-breadth profile of realistic queries or merely shifts context from visible code into hidden language machinery.
+
+### Ownership as a Worked Example
+
+Rust's ownership system is a useful concrete illustration. Without ownership, correctly using a pointer or reference may require loading substantial non-local context: who allocated it, when it is freed, whether it may be aliased, whether it crosses threads, and whether other code can mutate it concurrently. These are depth questions because the reader must traverse dependencies and conventions to reason about safety.
+
+Ownership, borrowing, and lifetime annotations move much of this context into the type system. A reader of a function signature can answer many ownership and aliasing questions locally, and the compiler rejects many programs whose safety would otherwise depend on informal discipline. The domain complexity of memory, aliasing, and concurrency has not disappeared. It has been relocated to a boundary where callers can rely on it without reconstructing the entire usage history. This is the same pattern Parnas identified for information hiding, realized at the level of language-enforced contracts.
 
 ### A CMP Reading of Language Evolution
 
-One interesting way to read the history of programming language abstraction is as an increasing ability to express and enforce context boundaries. Structured programming constrained control-flow context. Data abstraction constrained representation context. Static type systems constrained value context. Module systems constrained naming and reachability context. Ownership systems constrained resource-lifetime context. Effect systems constrain side-effect context.
+One useful reading of programming language evolution is that languages have gradually acquired more ways to express and enforce context boundaries. Structured programming constrained control-flow context. Data abstraction constrained representation context. Static type systems constrained value context. Module systems constrained naming and reachability context. Ownership systems constrained resource-lifetime context. Effect systems constrain side-effect context.
 
-Read this way, each generation of language abstraction has moved one more category of context out of convention and tribal knowledge, and into something a compiler or runtime can check. Boundaries that once depended on discipline and documentation became boundaries the language itself could enforce. This trajectory takes on new significance when the reader of code is no longer only a human. AI coding agents are, in effect, another party that must load context to act correctly — and the same machine-checkable boundaries that support local reasoning for humans are precisely the boundaries an agent can rely on without reconstructing hidden assumptions.
+This is not a claim that language history has a single direction or that stronger enforcement is always better. Each mechanism carries its own costs in verbosity, learning burden, annotation effort, and reduced flexibility. CMP provides a way to discuss the trade-off: a language abstraction is valuable when the context it makes explicit and enforceable is greater than the context it adds through ceremony, indirection, or hidden semantics.
 
 ## Implications for AI-Assisted Software Engineering
 

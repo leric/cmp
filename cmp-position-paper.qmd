@@ -5,7 +5,7 @@ author:
     affiliation: "Independent"
 date: "2026-04-24"
 abstract: |
-  Software engineering has accumulated many useful design principles, but their relationships are often explained only informally. This paper proposes the **Context Minimization Principle** (CMP) as an organizing lens: a design is better, all else equal, when it reduces the context a human developer or AI coding agent must load to answer a concrete engineering query, without obscuring essential domain complexity. We distinguish two modes of context expansion — **depth**, through dependency traversal, and **breadth**, through knowledge dispersion — and formulate their trade-off as an **Over-engineering Criterion** for design decisions. Through this lens we reinterpret classical principles, methodologies, and programming language abstractions, and argue that AI-assisted software engineering now makes context cost observable enough to study empirically.
+  Software design principles are often taught as separate rules, making it difficult to explain why they help, when they conflict, and when following them becomes over-engineering. This position paper proposes the **Context Minimization Principle** (CMP): a design is better, all else equal, when it reduces the query-relevant context a human developer or AI coding agent must load to reach a reliable answer, without obscuring essential domain complexity. Although context is query-relative, many maintenance tasks cluster around two recurring questions: how does this behavior work? and where does this domain decision need to change? CMP maps these questions to two modes of context expansion: **depth**, through dependency traversal, and **breadth**, through knowledge dispersion. Their trade-off yields an **Over-engineering Criterion**: a design move becomes suspect when the depth it introduces is not justified by the breadth it eliminates for the realistic engineering queries a system must support. Through this lens, familiar design principles and programming language abstractions become context-control mechanisms rather than isolated prescriptions.
 format:
   html:
     toc: true
@@ -19,22 +19,31 @@ bibliography: references.bib
 
 ## Introduction
 
-Software engineering has accumulated a rich vocabulary of design principles — information hiding, modularity, coupling and cohesion, DRY, SOLID, domain-driven design, clean architecture — each capturing something real about how software should be shaped. Yet when these principles overlap or conflict, practitioners usually fall back on experience or taste rather than a shared explanatory frame. DRY discourages duplication, but premature abstraction harms local reasoning. Clean architecture asks for strict dependency direction, but excessive layering forces readers to traverse many files before seeing behavior. These familiar tensions suggest that a useful organizing principle should speak not about code size, dependency count, or level of abstraction in isolation, but about how design choices affect the information needed to answer concrete engineering questions.
+Software engineering has accumulated a rich vocabulary of design advice: information hiding, modularity, coupling and cohesion, DRY, SOLID, domain-driven design, clean architecture, test-driven development, and many others. These principles are useful, but they are usually taught as separate rules. When they agree, this is not a problem. When they conflict, practitioners often fall back on experience, local taste, or slogans.
 
-This paper proposes the **Context Minimization Principle** (CMP) as such a lens:
+The conflicts are familiar. DRY discourages duplication, but the wrong abstraction can make simple behavior harder to understand. Clean architecture protects domain logic from infrastructure, but excessive layering can force a reader through multiple files before any behavior is visible. Dependency inversion can stabilize a boundary, but a forest of interfaces can turn every change into dependency-graph archaeology. These tensions suggest that software design needs a common currency for comparing design moves. Code size, dependency count, and abstraction level are useful proxies, but they do not directly capture what a developer is trying to spend less of: the context required to answer an engineering question correctly.
+
+This paper proposes the **Context Minimization Principle** (CMP) as that currency:
 
 > For a given engineering query, a design is better, all else equal, when it reduces the amount of relevant context that a human developer or AI coding agent must load to answer the query correctly, without obscuring essential domain complexity.
 
-CMP is not a call for less information per se. Software carries essential complexity that cannot be removed [@brooks1987silver], and hiding essential information behind unreliable boundaries merely relocates confusion. What CMP targets is *avoidable* context — the information a reader must load only because design decisions are scattered, leaky, duplicated, or implicit.
+CMP is not a call for less information per se. Software carries essential complexity that cannot be removed [@brooks1987silver], and hiding essential information behind unreliable boundaries merely relocates confusion. CMP targets *avoidable* context: information a reader must load only because design decisions are scattered, leaky, duplicated, implicit, or poorly bounded.
 
-This framing is especially useful now because context cost has become observable. AI coding agents operate under a bounded context window, pay tokens on every retrieval, and expose prompt construction, tool calls, and query outcomes — turning a long-standing design concern into something that can be measured, compared, and improved.
+The key move is to treat context as **query-relative** without making design judgment arbitrary. A function is not intrinsically high-context or low-context. It has a context footprint for a particular question: adding a field, verifying an invariant, tracing a production value, reviewing a refactor, or extending a domain rule.
 
-This paper makes four contributions:
+Although engineering queries are diverse, they cluster into a small number of recurring forms. Two clusters dominate everyday maintenance: *unit-or-path understanding* — "what does this code, or this execution path, actually do?" — and *purpose change* — "the requirement has shifted; where must I edit?" These clusters principally call upon two modes of context expansion: **depth**, which expands along dependency chains, and **breadth**, which expands across dispersed locations.
 
-1. It introduces CMP as a query-relative explanatory framework for software design.
-2. It distinguishes two modes of context expansion — **depth** and **breadth** — and formulates the **Over-engineering Criterion** from their trade-off.
-3. It reinterprets classical design principles, methodologies, and programming language abstractions through the context lens, giving language abstractions a dedicated treatment as context-boundary mechanisms.
-4. It outlines a research agenda for context-oriented metrics and tools covering both dimensions of context.
+The mapping is dominant rather than pure: most queries exercise both modes in some mix. The analytical unit of CMP is therefore the *(depth, breadth) profile* a design imposes on a query and, over a realistic query distribution, on the workload as a whole. This gives CMP operational bite. It does not retreat to "it depends"; it asks what *(depth, breadth) profile* a design move produces for the queries the system actually faces.
+
+This paper is a position paper: it proposes the theoretical structure that any concrete context metric must satisfy, rather than a specific metric or tool. The Research Agenda section discusses how depth and breadth might be operationalized in practice and what would count as empirical validation.
+
+This position paper makes three contributions:
+
+1. It defines CMP as a query-relative framework for reasoning about avoidable context in software design.
+2. It derives two dominant modes of context expansion — **depth** (dependency traversal) and **breadth** (location search) — from the two query clusters that dominate everyday maintenance: *unit-or-path understanding* and *purpose change*. The cluster-to-mode mapping is dominant rather than pure: most engineering queries exercise both modes in some mix.
+3. It formulates the **Over-engineering Criterion** from the depth-breadth trade-off: a design move is justified only when the context it removes is worth the context it adds for the realistic engineering queries the system must support.
+
+The rest of the paper develops these ideas and then uses them to reinterpret selected design principles, programming language abstractions, and AI-assisted software engineering as instances of context control.
 
 ## The Context Minimization Principle
 
@@ -51,7 +60,9 @@ Drawing an intuition from information theory — where information is defined in
 
 Crucially, context can be **explicit** or **implicit**. Explicit context is mechanically recoverable: a type signature, a well-named interface, or an inline comment. Implicit context consists of unstated assumptions, historical conventions, and "tribal knowledge" missing from the source text. For example, consider a module that requires `init()` to be called before `process()`. If this ordering is merely a convention, the temporal coupling is implicit context—a reader must trace the entire call stack to verify the rule is respected. If the design instead mandates that `init()` returns a `ReadyState` token which `process()` explicitly requires as an argument, the implicit historical knowledge is transformed into localized, compiler-verified context. A primary function of good software design is to convert unbounded implicit context into localized explicit context.
 
-Consequently, context is strictly **query-relative**, not an intrinsic property of the code itself. Consider a simple 5-line function that parses a date string. For the query *"does this function support the ISO 8601 format?"*, the required context is just those 5 lines of code. But for the query *"why is this function causing a timezone offset bug in the reporting dashboard?"*, the context footprint suddenly explodes. The reader must now load the server's ambient timezone configuration, the database's UTC storage conventions, and the data-fetching logic in the frontend client. The code itself hasn't changed, but the scope of information required to resolve the uncertainty has shifted entirely. The design question is therefore never just "is this code simple?", but rather: "how much must the reader know to answer *this specific query*?"
+Consequently, context is **query-relative**, not an intrinsic property of the code itself. Consider a simple 5-line function that parses a date string. For the query *"does this function support the ISO 8601 format?"*, the required context is just those 5 lines of code. But for the query *"why is this function causing a timezone offset bug in the reporting dashboard?"*, the context footprint expands. The reader must now load the server's ambient timezone configuration, the database's UTC storage conventions, and the data-fetching logic in the frontend client. The code itself has not changed, but the scope of information required to resolve the uncertainty has.
+
+This relativity does not make CMP vacuous. In practice, maintenance work is dominated by recurring query families. Comprehension and debugging queries ask, in different forms, *how does this behavior work?* They are sensitive to depth because the reader must traverse dependencies until the causal path is clear. Modification queries often ask *where must this business decision change?* They are sensitive to breadth because the reader must find every representation of a domain rule that must evolve together. CMP becomes operational by studying these recurring query families rather than treating every possible question as equally important.
 
 ### Human Context and Agent Context
 

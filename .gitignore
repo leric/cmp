@@ -1,0 +1,24 @@
+# Quarto render outputs
+/.quarto/
+/_freeze/
+/*_files/
+/*.html
+/*.pdf
+
+# Generated LaTeX source and intermediates
+/cmp-position-paper.tex
+/*.aux
+/*.bbl
+/*.bcf
+/*.blg
+/*.fdb_latexmk
+/*.fls
+/*.log
+/*.out
+/*.run.xml
+/*.synctex.gz
+/*.toc
+
+# arXiv packaging outputs
+/arxiv-package/
+/cmp-arxiv-source.zip

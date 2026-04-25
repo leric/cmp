@@ -1,0 +1,317 @@
+## Abstract
+
+Software engineering has accumulated many useful design principles, but their relationships are often explained only informally. This paper proposes the **Context Minimization Principle** (CMP) as an organizing lens: a design is better, all else equal, when it reduces the context a human developer or AI coding agent must load to answer a concrete engineering query, without obscuring essential domain complexity. We distinguish two modes of context expansion — **depth**, through dependency traversal, and **breadth**, through knowledge dispersion — and formulate their trade-off as an **Over-engineering Criterion** for design decisions. Through this lens we reinterpret classical principles, methodologies, and programming language abstractions, and argue that AI-assisted software engineering now makes context cost observable enough to study empirically.
+
+------
+
+## Introduction
+
+Software engineering has accumulated a rich vocabulary of design principles — information hiding, modularity, coupling and cohesion, DRY, SOLID, domain-driven design, clean architecture — each capturing something real about how software should be shaped. Yet when these principles overlap or conflict, practitioners usually fall back on experience or taste rather than a shared explanatory frame. DRY discourages duplication, but premature abstraction harms local reasoning. Clean architecture asks for strict dependency direction, but excessive layering forces readers to traverse many files before seeing behavior. These familiar tensions suggest that a useful organizing principle should speak not about code size, dependency count, or level of abstraction in isolation, but about how design choices affect the information needed to answer concrete engineering questions.
+
+This paper proposes the **Context Minimization Principle** (CMP) as such a lens:
+
+> For a given engineering query, a design is better, all else equal, when it reduces the amount of relevant context that a human developer or AI coding agent must load to answer the query correctly, without obscuring essential domain complexity.
+
+CMP is not a call for less information per se. Software carries essential complexity that cannot be removed [@brooks1987silver], and hiding essential information behind unreliable boundaries merely relocates confusion. What CMP targets is *avoidable* context — the information a reader must load only because design decisions are scattered, leaky, duplicated, or implicit.
+
+This framing is especially useful now because context cost has become observable. AI coding agents operate under a bounded context window, pay tokens on every retrieval, and expose prompt construction, tool calls, and query outcomes — turning a long-standing design concern into something that can be measured, compared, and improved.
+
+This paper makes four contributions:
+
+1. It introduces CMP as a query-relative explanatory framework for software design.
+2. It distinguishes two modes of context expansion — **depth** and **breadth** — and formulates the **Over-engineering Criterion** from their trade-off.
+3. It reinterprets classical design principles, methodologies, and programming language abstractions through the context lens, giving language abstractions a dedicated treatment as context-boundary mechanisms.
+4. It outlines a research agenda for context-oriented metrics and tools covering both dimensions of context.
+
+## The Context Minimization Principle
+
+### Query-Relative Context
+
+In this paper, an **engineering query** is a concrete question posed against a codebase with a definable correct answer or success criterion. Examples include:
+
+- *Comprehension:* What invariant does function F rely on?
+- *Modification:* What must I change to add this field end-to-end?
+- *Verification:* Will breaking this dependency cause a regression?
+- *Debugging:* Where does this unexpected production value come from?
+
+Drawing an intuition from information theory—where information is defined as the reduction of uncertainty—an engineering query represents a specific state of uncertainty. **Context**, then, is the precise set of signals a reader (human or AI) must process to reduce that uncertainty to zero. It represents the effective scope of the codebase that must be loaded into working memory to achieve a complete and correct understanding of the problem.
+
+Crucially, context can be **explicit** or **implicit**. Explicit context is mechanically recoverable: a type signature, a well-named interface, or an inline comment. Implicit context consists of unstated assumptions, historical conventions, and "tribal knowledge" missing from the source text. For example, consider a module that requires `init()` to be called before `process()`. If this ordering is merely a convention, the temporal coupling is implicit context—a reader must trace the entire call stack to verify the rule is respected. If the design instead mandates that `init()` returns a `ReadyState` token which `process()` explicitly requires as an argument, the implicit historical knowledge is transformed into localized, compiler-verified context. A primary function of good software design is to convert unbounded implicit context into localized explicit context.
+
+Consequently, context is strictly **query-relative**, not an intrinsic property of the code itself. Consider a simple 5-line function that parses a date string. For the query *"does this function support the ISO 8601 format?"*, the required context is just those 5 lines of code. But for the query *"why is this function causing a timezone offset bug in the reporting dashboard?"*, the context footprint suddenly explodes. The reader must now load the server's ambient timezone configuration, the database's UTC storage conventions, and the data-fetching logic in the frontend client. The code itself hasn't changed, but the scope of information required to resolve the uncertainty has shifted entirely. The design question is therefore never just "is this code simple?", but rather: "how much must the reader know to answer *this specific query*?"
+
+### Human Context and Agent Context
+
+Human developers and AI agents have different cognitive architectures, but they share a practical dependency on query-relevant information.
+
+For human developers, context cost appears as attention, working memory pressure, navigation effort, comprehension time, and the risk of overlooking hidden assumptions. A design that supports local reasoning allows the developer to make progress without reconstructing the entire system. This is one reason information hiding and modularity matter: they reduce the amount of external knowledge required to reason about a local change.
+
+For AI coding agents, context cost appears more mechanically. Relevant files must be retrieved or supplied in the prompt. Irrelevant files can pollute the prompt and distract the model. Large context increases token cost and latency. Missing context can produce plausible but incorrect changes. Hidden assumptions are difficult for an agent to recover unless they are encoded in tests, types, documentation, or accessible source structure.
+
+These two forms of context cost should not be treated as identical. Humans use long-term memory, social knowledge, visual scanning, and domain intuition in ways current agents do not. Agents can process large textual contexts quickly but may fail to distinguish contract from coincidence. Still, both humans and agents benefit when software design makes relevant information local, explicit, and bounded.
+
+### The Principle
+
+The **Context Minimization Principle** can be stated more formally:
+
+> Software design practices tend to improve maintainability when they reduce the query-relevant context that must be loaded across system boundaries, without obscuring essential domain complexity.
+
+This formulation has several important constraints.
+
+First, design evaluation under CMP must be grounded in an empirical **query distribution**. Because context is query-relative, it is tempting to dismiss any design debate with "it depends": a plugin architecture minimizes context for extension but inflates it for initial comprehension. However, this relativity does not render the principle un-operational. In practice, the universe of valuable queries for a given system is heavily skewed. When engineers argue about architecture, they are already implicitly assuming a specific workload of future changes. CMP makes this assumption explicit. A good design minimizes the context footprint for the *frequent and critical* queries a team actually faces (e.g., adding a new business rule), even if it increases the context cost for rare ones (e.g., swapping the database engine). By grounding evaluation in a query distribution, CMP escapes the "it depends" trap, shifting the debate from subjective aesthetics ("is this code elegant?") to empirical workloads ("does this structure pay off for our actual queries?").
+
+Second, **code minimization is not context minimization**. A common misconception is that shorter code is inherently lower-context. In reality, removing code often *increases* context if it replaces explicit behavior with implicit convention. A 100-line function with clear, linear control flow and explicit dependencies might require far less context to modify than a 10-line function that relies on metaprogramming, global state mutations, or undocumented framework lifecycles. Similarly, adding abstraction can reduce context when it creates a stable boundary, but inflate context when it forces readers to traverse indirection before understanding behavior.
+
+Third, CMP targets **avoidable context, not essential complexity**, but recognizes that profound design can reshape the domain itself. A common mistake is treating design as a passive container for inherently difficult business rules, hiding complexity behind opaque boundaries that merely relocate confusion. In reality, the "artificial cognitive tax" of avoidable context—scattered decisions, leaky abstractions, and implicit assumptions—is often a symptom of failing to grasp the domain's true shape. The best designs look past chaotic surface requirements to discover deep, underlying unities. When a model is distilled to its essence, both the structural noise and the perceived essential complexity drop. Because a superior design implementing the exact same domain functionality will inherently demand a smaller context footprint, CMP serves as a fundamental yardstick for architectural truth. Its ultimate goal is to ruthlessly eliminate artificial cognitive tax, freeing the reader to engage with—and perhaps even simplify—the true complexities of the domain.
+
+## Two Modes of Context Expansion: Depth and Breadth
+
+Context grows in different ways. This paper focuses on two major modes: **depth** and **breadth**. They are not exhaustive, but they provide a useful first decomposition of context-related design cost.
+
+### Depth: Context Through Dependency Chains
+
+**Depth** refers to context expansion through dependency traversal. A developer or agent begins with a code unit, but understanding it requires following calls, inheritance chains, configuration bindings, framework callbacks, global state, generated code, or runtime conventions. The deeper the traversal, the more context must be loaded before local reasoning becomes reliable.
+
+For example, imagine trying to understand why a parameter in a web controller is unexpectedly `null`. In a deeply abstracted system, answering this query might require traversing through three layers of dependency injection, two aspect-oriented interceptors, and a global exception handler just to find where the value was originally mutated.
+
+Common sources of depth include leaky abstractions, deep inheritance hierarchies, implicit global state, temporal coupling, framework magic, insufficient interface contracts, and dependency injection graphs that are hard to inspect. Depth is not caused by dependency alone. A dependency with a stable contract may reduce context by allowing callers to rely on an interface. Depth becomes costly when a boundary fails to stop the reader from needing implementation details.
+
+The design goal for depth is to enable local reasoning by cutting dependency traversal at reliable boundaries. A boundary is reliable when the client can use it without repeatedly inspecting its internals. Type signatures, tests, documentation, invariants, module visibility, and stable interfaces can all help create such boundaries.
+
+### Breadth: Context Through Knowledge Dispersion
+
+**Breadth** refers to context expansion through knowledge dispersion. Instead of following a deep chain, the developer or agent must search across many locations because one piece of knowledge is duplicated, fragmented, or inconsistently represented.
+
+For example, consider a product requirement to add a new "Guest" user role. To fulfill this single intent, a developer might have to update a database enum, modify an ORM model, rewrite hardcoded authorization logic scattered across five different controllers, and add a new option to a frontend dropdown. The knowledge of what constitutes a "role" is dispersed, forcing a broad and fragile context search.
+
+Common sources of breadth include duplicated business rules, copy-pasted validation logic, inconsistent naming, distributed configuration, schema drift, parallel implementations, and similar domain concepts represented differently in different layers. Breadth is especially costly during modification: changing one rule requires discovering all places where the rule is encoded.
+
+The design goal for breadth is to keep each piece of knowledge localized enough that change does not require broad search and synchronization. This is the context-based rationale behind DRY, single source of truth, schema centralization, shared domain language, and bounded contexts. The point is not to eliminate every repeated token. The point is to avoid dispersing the same decision across places that must evolve together.
+
+### Why Both Dimensions Are Needed
+
+Depth and breadth capture different failure modes. Neither can replace the other.
+
+A system can have low depth and high breadth. Each function may be simple and locally readable, but a core business rule—such as how to calculate a discounted price—might be independently implemented in the backend API, the database trigger, the frontend UI logic, and the scheduled billing job. Understanding any single location is effortless, but changing the rule safely requires broad, exhaustive search. We will call such a system **knowledge-scattered**.
+
+A system can also have high depth and low breadth. A discount rule might be defined in exactly one place, perfectly honoring the DRY principle. However, reaching that place might require traversing a generic `RuleEngine` interface, unpacking a dependency-injected `DiscountStrategyFactory`, deciphering a chain of abstract decorators, and finally locating the concrete implementation registered only at runtime. The knowledge is not duplicated, yet the path to it is labyrinthine. We will call such a system **deeply-abstracted**.
+
+These two failure modes cannot be addressed with the same remedy. Removing duplication in a knowledge-scattered system can inadvertently turn it into a deeply-abstracted one. Conversely, flattening the abstractions in a deeply-abstracted system can revert it back into a knowledge-scattered one. Because this trade-off is so fundamental to structural design, it forms the core operational metric of CMP.
+
+### The Depth–Breadth Trade-off and the Over-engineering Criterion
+
+Depth and breadth are not only orthogonal; they are frequently in tension. A common way to reduce one is to increase the other. This makes CMP more than a pair of independent objectives to minimize in isolation. It gives the principle operational bite by framing design decisions as trade-offs over a shared currency.
+
+Several canonical examples illustrate the trade-off:
+
+- **Extract abstraction to remove duplication (DRY).** Pulling repeated logic into a shared abstraction reduces breadth (the knowledge is no longer dispersed) but raises depth (callers must now traverse the abstraction to understand behavior).
+- **Rule of Three.** When duplication has occurred only once or twice, breadth cost is low, and the corresponding depth cost of a premature abstraction often dominates. This gives a context-cost reading of Sandi Metz's observation that "duplication is far cheaper than the wrong abstraction."
+- **Externalize configuration.** Moving hard-coded values into configuration reduces breadth across call sites but raises depth: behavior now depends on configuration state that must be loaded alongside the code.
+- **Microservice decomposition.** Splitting a monolith reduces depth inside each service (shorter internal dependency chains) but raises breadth across services (schemas, validation rules, and business concepts are dispersed across process boundaries). This gives a principled explanation for why over-decomposed microservices often hurt mid-sized systems.
+- **Inline a helper.** Inlining removes one level of indirection, reducing depth, but duplicates logic at call sites, raising breadth.
+
+In each case, deciding whether a refactoring is an improvement requires weighing the added depth against the removed breadth. This balance is rarely symmetrical. When a design pays a high depth cost (e.g., introducing a complex abstraction) to eliminate a breadth cost that rarely occurs in practice, the design has crossed the line into over-engineering.
+
+This observation yields an operational judgment rule:
+
+> **Over-engineering Criterion.** A design decision is over-engineered when it adds more depth context than the breadth context it eliminates, measured against the realistic engineering queries the system must support.
+
+The criterion reframes a number of familiar anti-patterns:
+
+- **Premature abstraction** pays depth cost without sufficient breadth pressure to justify it.
+- **Speculative generality** introduces depth to accommodate queries the system may never face.
+- **Over-layered architecture** forces every query to traverse layers whose breadth benefits do not, in practice, materialize.
+- **Over-parameterization** adds depth — every reader must reason across configuration branches — while producing breadth benefits only if multiple instantiations genuinely exist.
+
+Symmetrically, the criterion gives conditional defense to practices often labeled as bad:
+
+- **Duplication of simple, stable logic** can be justified when the breadth cost is low and the depth cost of a shared abstraction would dominate.
+- **Inlined helpers with well-chosen names** may be preferable to premature extraction.
+
+Because this trade-off is the primary driver of design friction, any attempt to measure codebase quality—whether through static analysis or AI agent metrics—must account for both depth and breadth. Optimizing only one will systematically mislead design decisions.
+
+## Classical Design Principles Through the Context Lens
+
+To demonstrate CMP as a unifying explanatory framework, we can reinterpret several classical design principles through the context lens. For each principle, we will establish a unified rhythm: defining its traditional focus, providing its CMP reinterpretation, and showing how CMP addresses the principle's original limitations or failure modes.
+
+### Information Hiding and Deep Modules
+
+**Traditional Focus:** Parnas argued that modules should be decomposed around design decisions likely to change, hiding those volatile decisions behind stable interfaces. Ousterhout later popularized this as "Deep Modules"—small interfaces hiding deep implementations.
+
+**CMP Interpretation:** Information hiding is fundamentally about minimizing a caller's **depth context**. A hidden decision is simply one that a client no longer needs to load to answer their query. The boundary absorbs internal complexity, presenting a minimal explicit context.
+
+"Encapsulation" is often mistakenly reduced to simply making fields `private` while exposing getters and setters. If a client still needs to understand the object's internal state machine to use the setter safely, the context footprint hasn't shrunk at all. CMP clarifies that a boundary only works if it genuinely halts dependency traversal during a query.
+
+### Coupling and Cohesion
+
+**Traditional Focus:** Systems should exhibit low coupling (few dependencies between modules) and high cohesion (related responsibilities belong together).
+
+**CMP Interpretation:** High cohesion reduces **breadth context** for modification queries: when related knowledge is kept together, a single business change doesn't trigger a massive, cross-module search. Low coupling reduces **depth context** for comprehension queries: you don't need to traverse the entire system to understand a single module.
+
+Traditional coupling metrics simply count structural edges (e.g., number of method calls or imports). But calling a pure `Math.max()` function (one edge) costs zero depth context, while invoking a method that mutates a global configuration dictionary (also one edge) requires massive implicit context to use safely. CMP shifts the focus from edge-counting to measuring the actual cognitive cost of traversing an edge.
+
+### DRY (Don't Repeat Yourself)
+
+**Traditional Focus:** Every piece of knowledge must have a single, unambiguous, authoritative representation within a system.
+
+**CMP Interpretation:** DRY is a strict heuristic for minimizing **breadth context**. When a business rule is duplicated, any modification query requires an exhaustive, error-prone search across the codebase to synchronize the scattered knowledge.
+
+DRY is notoriously misapplied to purely structural duplication (e.g., two identical loops serving completely different business domains). When developers prematurely extract an abstraction to "DRY up" this coincidental duplication, they pay a massive depth context penalty for zero actual breadth context savings. CMP explicitly solves this via the Over-engineering Criterion: DRY is only beneficial when it eliminates more breadth context than the depth context it introduces.
+
+### SOLID
+
+**Traditional Focus:** A suite of five object-oriented design principles aimed at making software more understandable, flexible, and maintainable.
+
+**CMP Interpretation:** SOLID is essentially a collection of heuristics for maintaining context boundaries.
+
+Blindly following SOLID often leads to highly fragmented codebases with excessive interfaces and dependency injection containers—maximizing depth context to an extreme degree. CMP provides the missing stopping condition for SOLID: apply these patterns only when the depth context they introduce is justified by the breadth context they eliminate.
+
+The table below details how each SOLID principle acts as a context control mechanism:
+
+| **Principle**                   | **Traditional Focus**                               | **CMP Interpretation**                                       |
+| ------------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| **SRP** (Single Responsibility) | A class should have only one reason to change.      | Bounds **breadth context** by keeping domain concepts together, and **depth context** by isolating unrelated changes. |
+| **OCP** (Open-Closed)           | Open for extension, closed for modification.        | Reduces the **depth context** needed to verify existing code when adding new features. |
+| **LSP** (Liskov Substitution)   | Subtypes must be substitutable for base types.      | Ensures boundaries are reliable; callers don't need to load the implicit **depth context** of concrete subclasses. |
+| **ISP** (Interface Segregation) | Clients shouldn't depend on methods they don't use. | Minimizes the explicit **depth context** a client must load to understand its contract. |
+| **DIP** (Dependency Inversion)  | Depend on abstractions, not concretions.            | Cuts **depth traversal** by replacing deep implementation context with a minimal abstract boundary. |
+
+## Methodologies and Practices
+
+### Domain-Driven Design (DDD)
+
+**Core Concept:** DDD is a comprehensive methodology for modeling complex software, encompassing both strategic boundaries and tactical implementation patterns.
+
+**CMP Interpretation:** DDD is perhaps the most explicit methodology for managing both depth and breadth context in business software. Its patterns map directly to context minimization strategies:
+
+- **Bounded Contexts (Strategic):** A Bounded Context restricts the **breadth context** of a domain concept. A "Customer" in the Billing context has a different structure and lifecycle than a "Customer" in the Shipping context. By preventing conceptual leakage, it shrinks the required context footprint for domain queries; a developer changing Billing does not need to load Shipping constraints.
+- **Ubiquitous Language (Strategic):** Eliminates **implicit depth context**. When business experts and developers use different terms, the "translation" becomes a cognitive tax. A ubiquitous language ensures that business intent maps directly to code, removing the need to traverse mental translation layers to understand a query.
+- **Aggregates (Tactical):** An Aggregate Root is a strict **depth boundary** for state mutation. Clients must interact with the root and cannot traverse into the aggregate's internal object graph to change state. This encapsulates invariants, ensuring that the rules governing a set of objects are not dispersed (low breadth) and that clients don't need to understand the internal object graph to use it safely (low depth).
+- **Value Objects (Tactical):** By enforcing immutability and identity by value, Value Objects eliminate the **depth context** of state history. A reader does not need to load the context of "who else holds a reference to this object and might change it?"—the value can be understood purely locally.
+- **Anti-Corruption Layer (Strategic/Tactical):** Acts as a context firewall. It cuts **depth traversal** by preventing the concepts of an external or legacy system from bleeding into the local domain model. Developers working in the core domain do not need to load the idiosyncratic context of the external dependency.
+
+### Clean and Hexagonal Architecture
+
+**Core Concept:** These architectures (including Ports and Adapters) separate software into concentric layers, mandating that dependencies only ever point inward toward the core domain logic.
+
+**CMP Interpretation:** Clean Architecture is fundamentally a strategy for aggressively bounding **depth context** for the most important queries (domain rules) by inverting dependencies, while using Use Cases to manage **breadth context**:
+
+- **Ports and Adapters (Dependency Inversion):** By forcing infrastructure (databases, UIs) to implement interfaces defined by the inward domain, the architecture severs the domain's outward dependency chain. When answering a query about core business logic, a developer does not need to load the **depth context** of how an ORM maps fields, how a message bus retries, or how an HTTP request is parsed. The infrastructure context is firewalled behind a stable interface.
+- **Use Cases (Interactors):** These construct a localized boundary for application-specific orchestrations. Instead of dispersing the steps for a complex action like "Checkout Cart" across a web controller, an event dispatcher, and a database transaction script (high breadth), a Use Case centralizes the orchestration. The reader loads the exact sequence of steps in one place, minimizing the search required.
+
+**Failure Modes:** Clean Architecture is notoriously susceptible to violating the **Over-engineering Criterion**. When applied dogmatically to simple CRUD features, it forces developers to traverse Controllers, Use Case boundaries, Repository interfaces, and Data Mappers just to save a record. This imposes a massive **depth context tax** (navigating multiple layers of indirection) while providing zero **breadth context relief** (the business logic is trivial and wasn't dispersed anyway). CMP clarifies that architectural layering is only valuable when it actually halts the leakage of complex external context.
+
+### Test-Driven Development (TDD)
+
+**Core Concept:** Writing executable specifications (tests) before or alongside the implementation, following a strict Red-Green-Refactor loop.
+
+**CMP Interpretation:** TDD is a practice of establishing explicit context boundaries *before* writing the implementation. It serves as both a context-discovery and context-bounding mechanism:
+
+- **Executable Context Boundaries:** A focused test explicitly answers the query "what must remain true here?" by externalizing behavioral expectations. This transforms implicit tribal knowledge into explicit, mechanical context, freeing future readers from having to reverse-engineer intent from deep implementation details.
+- **The Red-Green-Refactor Loop:** The "Red" phase forces the developer to define the exact breadth of the new requirement from the outside (the query). The "Green" phase allows unconstrained depth to satisfy it. The "Refactor" phase is the explicit application of the Over-engineering Criterion: optimizing the depth/breadth trade-off (e.g., extracting duplication to reduce breadth) while the test acts as a safety net that guarantees the outer context boundary hasn't shifted.
+
+**Failure Modes:** Brittle, deeply coupled tests—such as those relying on heavy mocking of internal implementation details—destroy the context boundary. Over-mocking forces the test to encode the *how* rather than the *what*. When a simple refactoring breaks 50 tests, the tests are no longer functioning as a stable boundary against depth context; they have instead duplicated the depth context, acting as a massive cognitive tax.
+
+## Programming Language Abstractions as Context Boundary Mechanisms
+
+Many features of modern programming languages can be read as mechanisms for making context boundaries explicit and enforceable. This is not their only purpose — languages also serve expressiveness, performance, and safety in ways not fully reducible to context — but the CMP lens helps explain why features that constrain interaction so often improve maintainability.
+
+### Features That Bound Context
+
+- **Type signatures** bound the set of values a function can receive and produce, so callers do not have to recover implicit shape information from implementations. Stronger type systems extend this with generics, type classes, and refinement types.
+- **Visibility and module systems** limit which internals are reachable, preventing accidental context leakage and stabilizing the surface that clients must load.
+- **Interfaces, traits, and abstract types** let clients rely on contracts rather than concrete implementations, cutting dependency traversal at a declared boundary. Crucially, an interface without detailed comments specifying its behavioral contract fails to act as a true boundary. Without comments explaining responsibilities and edge cases, the interface's information is incomplete, forcing the reader to traverse into concrete implementations anyway. In this lens, code comments are not a stylistic preference, but an essential structural component of the context boundary itself.
+- **Explicit error handling** (e.g., `Result`/`Option` types) places failure modes as explicit context directly in the function signature. Traditional exceptions, by contrast, create implicit depth context—callers must traverse the entire call stack to discover what might be thrown.
+- **Actor models and channel-based concurrency** establish strict context boundaries via message passing. Unlike shared-memory concurrency, which leaves the context boundary entirely open (any thread might mutate state at any time, requiring unbounded depth context), message passing isolates state and makes interaction explicit.
+- **Immutability and value semantics** eliminate state-history context by guaranteeing that observed values do not change under aliasing or time.
+- **Ownership and borrowing systems**, as in Rust, encode resource-lifetime constraints into the type system. Reasoning about memory or concurrency no longer requires loading global assumptions about who owns what; the type checker enforces them locally.
+- **Effect systems and capability types** make side-effect context explicit. A function annotated with its effects declares the ambient context a caller must consider, rather than hiding it behind implicit I/O or mutation.
+
+### Context Inflators: When Language Features Destroy Boundaries
+
+Conversely, features that prioritize code brevity over explicit boundaries often act as context inflators, creating severe leakage:
+
+- **Metaprogramming and macros** reduce token count (DRY) but explode depth context. The reader must mentally execute the macro expansion rules to understand the actual behavior, replacing explicit text with implicit generation logic.
+- **Implicit type conversions** shrink local code but force readers into an unbounded search across scopes to find where the conversion was defined, destroying local reasoning.
+
+### Extended Example: Ownership as Context Control
+
+Rust's ownership system is a useful concrete illustration. Without ownership, correctly using a pointer or reference requires loading a substantial amount of non-local context: who allocated it, when it is freed, whether it may be aliased, whether it crosses threads, and whether other code mutates it concurrently. This is depth context par excellence — the caller must traverse dependencies and informal conventions to reason about safety.
+
+Ownership, borrowing, and lifetime annotations move this context out of tribal knowledge and into the type system. A reader of a function signature can answer ownership and aliasing queries locally. The domain complexity of memory and aliasing has not disappeared; it has been relocated to a boundary where callers can rely on it without loading further context. This is the same pattern Parnas identified for information hiding, realized at the level of language-enforced contracts.
+
+### A CMP Reading of Language Evolution
+
+One interesting way to read the history of programming language abstraction is as an increasing ability to express and enforce context boundaries. Structured programming constrained control-flow context. Data abstraction constrained representation context. Static type systems constrained value context. Module systems constrained naming and reachability context. Ownership systems constrained resource-lifetime context. Effect systems constrain side-effect context.
+
+Read this way, each generation of language abstraction has moved one more category of context out of convention and tribal knowledge, and into something a compiler or runtime can check. Boundaries that once depended on discipline and documentation became boundaries the language itself could enforce. This trajectory takes on new significance when the reader of code is no longer only a human. AI coding agents are, in effect, another party that must load context to act correctly — and the same machine-checkable boundaries that support local reasoning for humans are precisely the boundaries an agent can rely on without reconstructing hidden assumptions.
+
+## Implications for AI-Assisted Software Engineering
+
+If human developers benefit from explicit, minimized context, AI coding agents depend on it more directly. Human readers can fall back on memory, intuition, and accumulated tribal knowledge to recover what the code does not say. An agent has none of this. It has only what can be retrieved into its prompt — source files, types, tests, documentation, commit history. Whatever is not made explicit must either be inferred from weak signals or confabulated. In this sense, AI-assisted development does not just inherit the context problem from human maintainability; it sharpens it. Good design under CMP is not merely *also* useful for agents — it is more load-bearing, because an agent has fewer compensating mechanisms when design fails.
+
+This sharpening comes with a practical upside: agent workflows make context cost *observable*. A human developer may describe a system as "hard to understand," but an agent workflow exposes concrete signals — retrieval size, prompt length, irrelevant context ratio, number of tool calls, retry count, patch failure, and test failure after generation — that turn a long-standing design concern into measurable data.
+
+## Research Agenda: Toward Context-Oriented Metrics
+
+CMP is a conceptual position, not a completed measurement theory. For the principle to become operational, it needs metrics, experiments, and tools. This section sketches directions for future work.
+
+### Measuring Depth
+
+A depth-oriented context metric would estimate the transitive context required to reason about a code unit while respecting abstraction boundaries. Unlike raw dependency count, such a metric should distinguish between dependencies that require implementation traversal and dependencies that are adequately summarized by stable contracts. As one concrete exploration of this dimension, we have been developing a tool called Context-Footprint along these lines; we mention it here as an illustration of what such a metric can look like, not as a settled methodology.
+
+Open design questions include how to identify reliable boundaries, how to weight different dependency edges, how to account for tests and documentation, and how to distinguish essential domain traversal from avoidable design leakage. Static structure alone is unlikely to be enough. Useful depth metrics may combine call graphs, type information, visibility, ownership, historical change data, and agent retrieval traces.
+
+### Measuring Breadth
+
+Breadth metrics should estimate how widely a piece of knowledge is dispersed. Relevant techniques may include semantic clone detection, duplicated business rule detection, schema and validation comparison, configuration scattering analysis, naming inconsistency detection, and change-set co-occurrence mining.
+
+The hard problem is distinguishing harmful duplication from harmless similarity. Two code fragments may look alike but represent independent decisions. Two fragments may look different but encode the same domain rule. Breadth metrics therefore need semantic signals, not only syntactic similarity.
+
+### Empirical Validation
+
+Context-oriented metrics should be evaluated against both human and agent outcomes. Possible human-centered measures include comprehension time, review time, change completion time, defect rate, and perceived cognitive load. Possible agent-centered measures include token consumption, retrieval size, localization accuracy, repair success, retry count, test pass rate, and patch minimality.
+
+The strongest validation would compare context metrics against realistic engineering queries across codebases. For example, does a higher depth score predict more files opened, longer review time, or lower agent repair success? Does a higher breadth score predict missed update locations or inconsistent fixes? Following the Over-engineering Criterion, depth and breadth metrics should also be validated together: a design that lowers one while raising the other should not look uniformly better under a useful metric. Such studies would help determine whether CMP provides measurable explanatory power beyond existing metrics.
+
+### Open Questions
+
+Several open questions become visible once CMP is taken as a serious frame rather than a loose metaphor. They are not reasons to doubt the principle; they are the research program it implies.
+
+1. **Where do query distributions come from, and how stable are they?** CMP evaluates designs against the distribution of queries a team actually faces, but does not say how that distribution is obtained. Can it be inferred from issue trackers, change history, incident post-mortems, and agent task logs? How much does it drift as a codebase evolves, teams rotate, or business priorities shift, and how should decisions meant to outlive the current distribution be evaluated?
+2. **Does context cost compose predictably across modules?** Depth and breadth are discussed mostly at the unit or module level. If the context footprint of module A for query Q₁ and of module B for Q₂ are both known, what should be expected of a query that spans both? Is the cost additive, super-additive due to boundary interactions, or sub-additive when a shared contract absorbs both sides? Scaling CMP from local measurement to system-level judgment requires an answer.
+3. **Do different query types imply different design optima?** Modification, debugging, review, and extension do not pay the same cost at the same boundaries. A codebase dominated by comprehension queries and a codebase dominated by modification queries may warrant visibly different architectures. Is there a principled way to characterize the architectural shift induced by a change in query regime, rather than leaving it to taste?
+4. **When does making context explicit begin to cost more than it saves?** CMP prescribes converting implicit context into explicit, locally-available context through types, tests, documentation, and structural boundaries. Each of these carries maintenance cost, drift risk, and signal-to-noise dilution. Is there a measurable point at which additional explicitness degrades rather than improves the reader's experience, and how should a theory of context minimization account for the cost of its own preferred remedy?
+5. **Do human-optimal and agent-optimal designs converge?** Humans and agents both benefit from bounded, explicit context, but their retrieval mechanisms and failure modes differ substantially. Are there systematic cases in which a design improvement for one harms the other? If so, which reader should a design target, and does the answer change with codebase stage, team composition, or how deeply agents are embedded in the workflow?
+
+## Related Work
+
+### Information Hiding and Modularity
+
+CMP builds directly on the tradition of information hiding and modularity. Parnas framed modular decomposition around hidden design decisions [@parnas1972criteria]. Data abstraction and abstract types developed related ideas about separating use from representation [@liskov1987data]. CMP does not replace this tradition. It reframes information hiding as one instance of a broader context-cost perspective.
+
+### Local Reasoning and Separation Logic
+
+Local reasoning appears in both practical and formal software engineering. Separation logic provides a formal method for reasoning about programs by separating heap regions and limiting the required reasoning context [@reynolds2002separation]. CMP is inspired by this spirit but operates at the level of practical software comprehension rather than formal proof. Its concern is not only what can be proven locally, but what can be understood, modified, reviewed, and generated with bounded context.
+
+### Software Metrics
+
+Software metrics have long attempted to quantify aspects of complexity and maintainability. Cyclomatic complexity measures control-flow paths [@mccabe1976complexity]. Object-oriented metrics measure coupling, cohesion, inheritance, and related structural properties [@chidamber1994metrics]. Cognitive complexity attempts to better approximate understandability than path-counting metrics [@campbell2018cognitive].
+
+CMP is compatible with these metrics but suggests a different target. Existing metrics measure important proxies. A context-oriented metric would estimate query-relevant context more directly: what must be loaded, from where, and across which boundaries, for a particular kind of engineering query?
+
+### Software Design Literature
+
+Brooks's distinction between essential and accidental complexity is central to CMP's scope [@brooks1987silver]. CMP aims to reduce avoidable context cost, not erase essential domain difficulty. Ousterhout's deep modules provide a concrete design ideal for absorbing complexity behind small interfaces [@ousterhout2018philosophy]. Evans's bounded context shows how domain language and model boundaries reduce ambiguity [@evans2003ddd]. Hickey's distinction between simple and easy also resonates with CMP: convenience that complects concerns may reduce immediate effort while increasing future context [@hickey2011simple].
+
+## Conclusion
+
+Many familiar software design principles — information hiding, coupling and cohesion, DRY, SOLID, domain-driven design, clean architecture, TDD — can be read as different local heuristics for controlling a single underlying quantity: the query-relevant context a reader must load in order to act on the code. The contribution of this paper is to take that shared currency seriously and give it structure.
+
+Two moves do most of the work. The first is decomposing context expansion into **depth** and **breadth** — traversal along dependencies and search across dispersed knowledge — and recognizing that these two modes fail differently, respond to different remedies, and frequently trade against each other. The second is the **Over-engineering Criterion**, which turns that trade-off into an operational rule: a design move is worth making only when the depth it adds is less than the breadth it eliminates, measured against the queries the system actually faces. Together they give CMP something purely qualitative design principles lack — the ability to adjudicate between competing prescriptions without retreating to "it depends."
+
+Read through this lens, the history of programming language abstractions — from structured programming through type systems, modules, ownership, and effect systems — looks less like a parade of unrelated features and more like a sustained effort to move context out of convention and tribal knowledge into boundaries that a compiler or runtime can enforce. Each generation shrinks the implicit context a reader must carry and enlarges the explicit context a language can check.
+
+This trajectory matters more when the reader of code is no longer only human. Agents have no tribal knowledge to rescue them when design fails; whatever is not made explicit at a reliable boundary must be retrieved, inferred, or confabulated. Good design under CMP is therefore not merely *also* useful for agents but more load-bearing — and the same agent workflows that depend on it make the previously intangible cost of bad design newly measurable.
+
+CMP, as presented here, is a conceptual foundation rather than a finished theory. It gives existing practice a shared vocabulary and gives design arguments a currency to settle in. What remains is to make that currency quantitative: to develop metrics for depth and breadth, to recover realistic query distributions from engineering history, and to test whether designs judged better under CMP are in fact easier — for humans and agents alike — to understand, modify, review, and repair.

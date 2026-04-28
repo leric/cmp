@@ -3,7 +3,6 @@
 /_freeze/
 /*_files/
 /*.html
-/*.pdf
 
 # Generated LaTeX source and intermediates
 /cmp-position-paper.tex
